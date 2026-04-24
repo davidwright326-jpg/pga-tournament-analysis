@@ -3,7 +3,6 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from scipy.stats import spearmanr
 from sqlalchemy.orm import Session
 
 from app.config import REQUIRED_STAT_KEYS, MIN_HISTORICAL_SEASONS
@@ -11,6 +10,39 @@ from app.models import TournamentResult, PlayerStat, Tournament
 from app.analysis.archetypes import classify_course_from_tournament, get_archetype_weights
 
 logger = logging.getLogger(__name__)
+
+
+def _rank_data(data):
+    """Assign ranks to data (average method for ties)."""
+    indexed = sorted(enumerate(data), key=lambda x: x[1])
+    ranks = [0.0] * len(data)
+    i = 0
+    while i < len(indexed):
+        j = i
+        while j < len(indexed) - 1 and indexed[j + 1][1] == indexed[j][1]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1
+        for k in range(i, j + 1):
+            ranks[indexed[k][0]] = avg_rank
+        i = j + 1
+    return ranks
+
+
+def _spearmanr(x, y):
+    """Pure Python Spearman rank correlation (replaces scipy.stats.spearmanr)."""
+    n = len(x)
+    if n < 3:
+        return 0.0
+    rx = _rank_data(x)
+    ry = _rank_data(y)
+    mean_rx = sum(rx) / n
+    mean_ry = sum(ry) / n
+    num = sum((a - mean_rx) * (b - mean_ry) for a, b in zip(rx, ry))
+    den_x = sum((a - mean_rx) ** 2 for a in rx) ** 0.5
+    den_y = sum((b - mean_ry) ** 2 for b in ry) ** 0.5
+    if den_x == 0 or den_y == 0:
+        return 0.0
+    return num / (den_x * den_y)
 
 # Explanation templates based on stat weight ranking
 EXPLANATIONS = {
@@ -81,10 +113,8 @@ def compute_stat_weights_from_data(
         values = merged["stat_value"].values
 
         try:
-            corr, _ = spearmanr(values, positions)
-            # Negative correlation means higher stat -> lower (better) position
-            # We want the absolute value as importance
-            correlations[cat] = abs(corr) if pd.notna(corr) else 0.0
+            corr = _spearmanr(list(values), list(positions))
+            correlations[cat] = abs(corr) if not (corr != corr) else 0.0  # NaN check
         except Exception:
             correlations[cat] = 0.0
 
