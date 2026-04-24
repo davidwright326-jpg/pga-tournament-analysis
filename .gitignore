@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.hypothesis/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Node
+node_modules/
+.next/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Build info
+frontend/tsconfig.tsbuildinfo

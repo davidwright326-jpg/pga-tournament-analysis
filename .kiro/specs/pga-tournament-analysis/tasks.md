@@ -1,0 +1,145 @@
+# Tasks: PGA Tournament Analysis Tool
+
+## 1. Project Setup & Infrastructure
+- [x] 1.1 Initialize backend Python project with FastAPI, SQLAlchemy, httpx, pandas, scipy, APScheduler, Hypothesis
+  - Create `backend/` directory with `pyproject.toml`, `requirements.txt`, and project structure
+  - Set up `backend/app/main.py` with FastAPI app skeleton
+  - Set up `backend/app/config.py` for configuration (API keys, DB path, scheduler settings)
+- [x] 1.2 Initialize frontend Next.js project with Recharts and Tailwind CSS
+  - Create `frontend/` directory using Next.js 14 App Router
+  - Install Recharts, Tailwind CSS, and fast-check (dev dependency)
+  - Set up basic layout with navigation
+- [x] 1.3 Set up SQLite database schema and models
+  - Create `backend/app/models.py` with SQLAlchemy models for all 5 tables (tournaments, tournament_results, player_stats, course_stat_weights, player_fit_scores)
+  - Create `backend/app/database.py` with engine setup and session management
+  - Create initialization script that creates tables on first run
+
+## 2. Data Fetching Layer
+- [x] 2.1 Implement PGA Tour GraphQL client
+  - Create `backend/app/data/pga_client.py` with async httpx client
+  - Implement `fetch_tournament_schedule(season)` - queries tournament schedule
+  - Implement `fetch_past_results(tournament_id, year)` - queries TournamentPastResults
+  - Implement `fetch_stat_details(stat_id, season)` - queries StatDetails for a stat category
+  - Handle API key header, error responses, and rate limiting
+- [x] 2.2 Implement data ingestion pipeline
+  - Create `backend/app/data/ingestion.py`
+  - Implement `ingest_schedule(season)` - fetches schedule and upserts into tournaments table
+  - Implement `ingest_player_stats(season)` - fetches all 12 stat categories and upserts into player_stats
+  - Implement `ingest_past_results(tournament_id, seasons)` - fetches historical results and upserts into tournament_results
+  - Add logging for each ingestion step
+- [x] 2.3 Implement tournament resolver
+  - Create `backend/app/data/tournament_resolver.py`
+  - Implement `resolve_current_tournament(date, schedule)` - returns the active or next upcoming tournament
+  - Handle edge cases: no active tournament, off-season, schedule gaps
+
+## 3. Analysis Engine
+- [x] 3.1 Implement course stat importance analysis
+  - Create `backend/app/analysis/engine.py`
+  - Implement `compute_stat_weights(tournament_id, seasons)` using Spearman rank correlation
+  - Normalize weights to sum to 1.0
+  - Ensure all 12 required stat categories are present in output
+  - Generate explanation strings for each stat weight
+- [x] 3.2 Implement composite fit score calculation
+  - Create `backend/app/analysis/scoring.py`
+  - Implement `compute_fit_score(player_stats, stat_weights, stat_percentiles)` using z-score normalization and weighted sum
+  - Implement `compute_all_fit_scores(tournament_id)` that scores all players and stores results
+- [x] 3.3 Implement recency weighting
+  - Add `apply_recency_weight(stat_value, weeks_ago, half_life=12)` to `backend/app/analysis/scoring.py`
+  - Integrate recency weighting into the fit score pipeline
+- [x] 3.4 Implement course archetype fallback
+  - Create `backend/app/analysis/archetypes.py`
+  - Define course archetypes (links, parkland_long, parkland_short, desert, coastal, mountain)
+  - Implement `classify_course(tournament)` based on metadata
+  - Implement `get_archetype_weights(archetype)` that aggregates stats from similar courses
+  - Integrate fallback into `compute_stat_weights` when historical data is insufficient
+
+## 4. Backend API Endpoints
+- [x] 4.1 Implement tournament endpoints
+  - `GET /api/tournament/current` - returns current tournament details
+  - `GET /api/tournament/{id}/stats` - returns stat importance weights
+  - `GET /api/tournament/{id}/history` - returns past winners with stats
+- [x] 4.2 Implement player endpoints
+  - `GET /api/players/rankings` - returns ranked player list with fit scores, supports query params: tournament_id, limit, min_rank, filter_stat
+  - `GET /api/players/{id}/profile` - returns player detail with stat comparison to course ideal and historical winner avg
+- [x] 4.3 Implement system endpoints
+  - `POST /api/refresh` - triggers manual data refresh pipeline
+  - `GET /api/status` - returns system status, last refresh timestamp, error log
+- [x] 4.4 Set up scheduler for weekly auto-refresh
+  - Configure APScheduler to run the full refresh pipeline every Tuesday at 6:00 AM ET
+  - Log refresh start/completion/errors
+  - Store refresh status in a simple status table or file
+
+## 5. Frontend Dashboard
+- [x] 5.1 Build tournament header component
+  - Create component showing tournament name, course, dates, par, yardage
+  - Handle loading and error states
+  - Show "no tournament" message when applicable
+- [x] 5.2 Build stat importance chart
+  - Create radar chart or horizontal bar chart using Recharts
+  - Display stat categories with their importance weights
+  - Include tooltips with explanation text
+- [x] 5.3 Build player rankings table
+  - Create sortable, filterable table component
+  - Columns: Rank, Player Name, World Ranking, Composite Score, and each key stat value
+  - Implement client-side sorting by any column
+  - Implement filter controls (min ranking, stat thresholds, field membership)
+  - Link player names to detail page
+- [x] 5.4 Build player detail page
+  - Create `/player/[id]` route
+  - Show player info card with name, ranking, composite score
+  - Show stat comparison chart (player vs. course ideal vs. historical winner avg)
+  - Highlight stats where player significantly exceeds or falls short
+- [x] 5.5 Build course history page
+  - Create `/history` route
+  - Show past winners table (last 5-10 years) with key stats
+  - Add player comparison overlay tool
+- [x] 5.6 Add last-updated indicator and manual refresh button
+  - Display "Last updated: [timestamp]" in dashboard header
+  - Add refresh button that calls POST /api/refresh
+  - Show loading state during refresh
+
+## 6. Property-Based Tests
+- [x] 6.1 P1: Stat weight normalization property test
+  - In `backend/tests/test_analysis.py`
+  - Generate random historical data using Hypothesis
+  - Verify all weights are in [0, 1] and sum to 1.0 (+-0.001)
+  - **Validates: Requirements 2.2**
+- [x] 6.2 P2: Stat category completeness property test
+  - In `backend/tests/test_analysis.py`
+  - Verify output always contains all 12 required stat categories
+  - **Validates: Requirements 2.3**
+- [x] 6.3 P3: Player ranking order consistency property test
+  - In `backend/tests/test_rankings.py`
+  - Generate random player stats and weights
+  - Verify output is sorted in descending order by composite score
+  - **Validates: Requirements 3.1, 3.3**
+- [x] 6.4 P4: Composite score correctness property test
+  - In `backend/tests/test_rankings.py`
+  - Generate random stats, weights, and percentiles
+  - Verify computed score matches manual weighted z-score sum
+  - **Validates: Requirements 3.3**
+- [x] 6.5 P5: Filter subset property test
+  - In `backend/tests/test_rankings.py`
+  - Generate random rankings and filter params
+  - Verify filtered result is a subset of unfiltered result
+  - **Validates: Requirements 3.5**
+- [x] 6.6 P6: Recency weight monotonicity property test
+  - In `backend/tests/test_recency.py`
+  - Generate random stat values and time offsets
+  - Verify weight decreases as weeks_ago increases
+  - **Validates: Requirements 3.4**
+- [x] 6.7 P7: Historical comparison delta correctness property test
+  - In `backend/tests/test_comparison.py`
+  - Generate random player stats and winner averages
+  - Verify delta = player_stat - winner_avg and highlighting is correct
+  - **Validates: Requirements 6.2, 6.3**
+- [x] 6.8 P8: Sort stability property test (frontend)
+  - In `frontend/tests/sort.test.ts`
+  - Generate random ranking data using fast-check
+  - Verify sorting by any column produces valid total order and is idempotent
+  - **Validates: Requirements 4.3**
+- [x] 6.9 P9: Current tournament resolution property test
+  - In `backend/tests/test_tournament.py`
+  - Generate random schedules and dates
+  - Verify resolver returns correct active or next upcoming tournament
+  - **Validates: Requirements 1.2**

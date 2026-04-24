@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Start Dev Servers",
+  "description": "Automatically starts the backend (uvicorn on port 8000) and frontend (Next.js on port 3000) dev servers when a prompt is submitted. Runs once to get both servers going.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Start both dev servers for the PGA Tournament Analysis project: 1) Start the backend with `python -m uvicorn app.main:app --reload --port 8000` in the backend/ directory as a background process. 2) Start the frontend with `node node_modules/next/dist/bin/next dev` in the frontend/ directory as a background process. Check both are running and report their URLs."
+  }
+}
