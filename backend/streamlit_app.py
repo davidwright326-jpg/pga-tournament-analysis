@@ -645,9 +645,13 @@ if page == "🏠 Dashboard":
 
     # Filter to field only if we have field data
     if field_ids:
-        rankings = [r for r in rankings if r["player_id"] in field_ids]
-        field_note = f"Showing {len(rankings)} players in the official field"
+        scored_field = [r for r in rankings if r["player_id"] in field_ids]
+        scored_ids = {r["player_id"] for r in rankings}
+        unscored_field = [pid for pid in field_ids if pid not in scored_ids]
+        rankings = scored_field
+        field_note = f"Showing {len(rankings)} scored players in the field ({len(unscored_field)} without stats)"
     else:
+        unscored_field = []
         field_note = "⚠️ No field data available — showing all ranked players. Refresh data to fetch the field."
 
     if rankings:
@@ -695,6 +699,32 @@ if page == "🏠 Dashboard":
                 row[SHORT_LABELS.get(cat, cat)] = round(val, 2) if val is not None else None
             row["_player_id"] = r["player_id"]
             rows.append(row)
+
+        # Add unscored field players at the bottom
+        if unscored_field and field_ids:
+            from app.models import TournamentField
+            db = db_session()
+            try:
+                unscored_entries = (
+                    db.query(TournamentField)
+                    .filter(
+                        TournamentField.tournament_id == tournament.id,
+                        TournamentField.player_id.in_(unscored_field),
+                    )
+                    .all()
+                )
+            finally:
+                db.close()
+            for entry in unscored_entries:
+                row = {
+                    "#": "—",
+                    "Player": entry.player_name,
+                    "OWGR": "—",
+                    "Fit Score": "No stats",
+                }
+                for cat in top_stats:
+                    row[SHORT_LABELS.get(cat, cat)] = None
+                rows.append(row)
 
         df_rankings = pd.DataFrame(rows)
         display_cols = [c for c in df_rankings.columns if not c.startswith("_")]
