@@ -193,7 +193,7 @@ def load_tournament_field(tournament_id: str) -> set:
 
 
 @st.cache_data(ttl=300)
-def load_player_rankings(tournament_id: str, limit: int = 200):
+def load_player_rankings(tournament_id: str, limit: int = 500):
     db = db_session()
     try:
         scores = (
