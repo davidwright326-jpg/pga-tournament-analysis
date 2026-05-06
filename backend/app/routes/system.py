@@ -22,7 +22,7 @@ _refresh_status = {
 
 def _run_refresh_sync():
     """Execute the full data refresh pipeline synchronously in a background thread."""
-    from app.data.ingestion import ingest_schedule, ingest_player_stats, ingest_past_results, ingest_event_stats, ingest_season_winners
+    from app.data.ingestion import ingest_schedule, ingest_player_stats, ingest_past_results, ingest_event_stats, ingest_season_winners, ingest_tournament_field
     from app.data.tournament_resolver import resolve_current_tournament
     from app.data import pga_client
     from app.analysis.engine import compute_stat_weights, generate_explanation
@@ -58,6 +58,9 @@ def _run_refresh_sync():
 
         # 3. Ingest player stats
         loop.run_until_complete(ingest_player_stats(current_year, db))
+
+        # 3b. Ingest tournament field (official entry list)
+        loop.run_until_complete(ingest_tournament_field(current.id, db))
 
         # 4. Ingest historical results
         seasons = list(range(current_year - DEFAULT_LOOKBACK_SEASONS, current_year + 1))

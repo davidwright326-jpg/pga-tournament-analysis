@@ -104,3 +104,17 @@ class EventPlayerStat(Base):
     __table_args__ = (
         UniqueConstraint("tournament_id", "season", "player_id", "stat_category"),
     )
+
+
+class TournamentField(Base):
+    """Players in the official field/entry list for a tournament."""
+    __tablename__ = "tournament_field"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tournament_id = Column(Text, ForeignKey("tournaments.id"), nullable=False)
+    player_id = Column(Text, nullable=False)
+    player_name = Column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("tournament_id", "player_id"),
+    )

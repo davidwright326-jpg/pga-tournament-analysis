@@ -21,7 +21,7 @@ import asyncio
 from app.database import SessionLocal, init_db
 from app.models import (
     Tournament, TournamentResult, PlayerStat, CourseStatWeight,
-    PlayerFitScore, EventPlayerStat,
+    PlayerFitScore, EventPlayerStat, TournamentField,
 )
 from app.data.tournament_resolver import resolve_current_tournament
 from app.analysis.engine import generate_explanation
@@ -173,6 +173,21 @@ def load_stat_weights(tournament_id: str):
             })
         result.sort(key=lambda x: x["weight"], reverse=True)
         return result
+    finally:
+        db.close()
+
+
+@st.cache_data(ttl=300)
+def load_tournament_field(tournament_id: str) -> set:
+    """Load the set of player IDs in the official tournament field."""
+    db = db_session()
+    try:
+        players = (
+            db.query(TournamentField.player_id)
+            .filter(TournamentField.tournament_id == tournament_id)
+            .all()
+        )
+        return {p[0] for p in players}
     finally:
         db.close()
 
@@ -626,6 +641,12 @@ if page == "🏠 Dashboard":
 
     # Player rankings table
     rankings = load_player_rankings(tournament.id)
+    field_ids = load_tournament_field(tournament.id)
+
+    # Filter to field only if we have field data
+    if field_ids:
+        rankings = [r for r in rankings if r["player_id"] in field_ids]
+
     if rankings:
         st.subheader("Player Rankings")
 

@@ -211,3 +211,30 @@ async def fetch_event_stat_details(
     stat_details = data.get("statDetails", {})
     rows = stat_details.get("rows", [])
     return [r for r in rows if r.get("__typename") == "StatDetailsPlayer"]
+
+
+async def fetch_tournament_field(tournament_id: str) -> list[dict]:
+    """Fetch the official field (entry list) for a tournament."""
+    payload = {
+        "operationName": "TournamentEntryList",
+        "variables": {"tournamentId": tournament_id},
+        "query": """query TournamentEntryList($tournamentId: ID!) {
+          tournamentEntryList(id: $tournamentId) {
+            players {
+              id
+              firstName
+              lastName
+              displayName
+              country
+            }
+          }
+        }""",
+    }
+    try:
+        data = await _graphql_request(payload)
+        entry_list = data.get("tournamentEntryList", {})
+        players = entry_list.get("players", [])
+        return [{"player_id": p.get("id", ""), "player_name": p.get("displayName", "")} for p in players if p.get("id")]
+    except Exception as e:
+        logger.warning("Failed to fetch tournament field for %s: %s", tournament_id, e)
+        return []

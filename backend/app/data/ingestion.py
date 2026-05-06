@@ -344,3 +344,29 @@ async def ingest_season_winners(season: int, db: Session):
 
     db.commit()
     logger.info("Total season winner rows ingested: %d", total)
+
+
+async def ingest_tournament_field(tournament_id: str, db: Session):
+    """Fetch and store the official tournament field."""
+    from app.models import TournamentField
+
+    logger.info("Ingesting field for tournament %s", tournament_id)
+    players = await pga_client.fetch_tournament_field(tournament_id)
+
+    if not players:
+        logger.warning("No field data returned for %s", tournament_id)
+        return
+
+    for p in players:
+        stmt = sqlite_upsert(TournamentField).values(
+            tournament_id=tournament_id,
+            player_id=p["player_id"],
+            player_name=p["player_name"],
+        ).on_conflict_do_update(
+            index_elements=["tournament_id", "player_id"],
+            set_={"player_name": p["player_name"]},
+        )
+        db.execute(stmt)
+
+    db.commit()
+    logger.info("Ingested %d players in field for %s", len(players), tournament_id)
