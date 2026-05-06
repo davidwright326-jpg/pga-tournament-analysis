@@ -214,27 +214,55 @@ async def fetch_event_stat_details(
 
 
 async def fetch_tournament_field(tournament_id: str) -> list[dict]:
-    """Fetch the official field (entry list) for a tournament."""
+    """Fetch the official field for a tournament from the leaderboard/results."""
+    # Try fetching current results (works for in-progress and completed events)
     payload = {
-        "operationName": "TournamentEntryList",
+        "operationName": "Leaderboard",
         "variables": {"tournamentId": tournament_id},
-        "query": """query TournamentEntryList($tournamentId: ID!) {
-          tournamentEntryList(id: $tournamentId) {
+        "query": """query Leaderboard($tournamentId: ID!) {
+          leaderboardV2(id: $tournamentId) {
             players {
-              id
-              firstName
-              lastName
-              displayName
-              country
+              player {
+                id
+                displayName
+              }
             }
           }
         }""",
     }
     try:
         data = await _graphql_request(payload)
-        entry_list = data.get("tournamentEntryList", {})
-        players = entry_list.get("players", [])
+        leaderboard = data.get("leaderboardV2", {})
+        players = leaderboard.get("players", [])
+        result = []
+        for p in players:
+            player_info = p.get("player", {})
+            pid = player_info.get("id", "")
+            if pid:
+                result.append({"player_id": pid, "player_name": player_info.get("displayName", "")})
+        if result:
+            return result
+    except Exception as e:
+        logger.warning("Leaderboard query failed for %s: %s", tournament_id, e)
+
+    # Fallback: try the field/entry list query
+    payload2 = {
+        "operationName": "Field",
+        "variables": {"tournamentId": tournament_id},
+        "query": """query Field($tournamentId: ID!) {
+          field(id: $tournamentId) {
+            players {
+              id
+              displayName
+            }
+          }
+        }""",
+    }
+    try:
+        data = await _graphql_request(payload2)
+        field = data.get("field", {})
+        players = field.get("players", [])
         return [{"player_id": p.get("id", ""), "player_name": p.get("displayName", "")} for p in players if p.get("id")]
     except Exception as e:
-        logger.warning("Failed to fetch tournament field for %s: %s", tournament_id, e)
+        logger.warning("Field query also failed for %s: %s", tournament_id, e)
         return []

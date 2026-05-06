@@ -646,9 +646,13 @@ if page == "🏠 Dashboard":
     # Filter to field only if we have field data
     if field_ids:
         rankings = [r for r in rankings if r["player_id"] in field_ids]
+        field_note = f"Showing {len(rankings)} players in the official field"
+    else:
+        field_note = "⚠️ No field data available — showing all ranked players. Refresh data to fetch the field."
 
     if rankings:
         st.subheader("Player Rankings")
+        st.caption(field_note)
 
         # Filters
         fcol1, fcol2, fcol3 = st.columns([1, 1, 1])
