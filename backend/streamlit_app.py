@@ -526,7 +526,7 @@ def trigger_refresh():
 st.sidebar.title("⛳ PGA Analysis")
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Dashboard", "🎯 Custom Rankings", "📊 Player Detail", "📜 Course History", "🏆 Season Results"],
+    ["🏠 Dashboard", "🎯 Custom Rankings", "📊 Player Detail", "📜 Course History", "🏆 Season Results", "📈 Track Record"],
     label_visibility="collapsed",
 )
 
@@ -1192,3 +1192,180 @@ elif page == "🎯 Custom Rankings":
             margin=dict(l=0, r=20, t=10, b=10),
         )
         st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Track Record page
+# ---------------------------------------------------------------------------
+elif page == "📈 Track Record":
+    st.title("📈 Track Record")
+    st.caption("How did the model's top picks actually finish? Compare pre-tournament fit rankings against actual results.")
+
+    current_year = date.today().year
+    db = db_session()
+    try:
+        # Get all tournaments this season that have results
+        completed_tournaments = (
+            db.query(Tournament)
+            .filter(Tournament.season == current_year, Tournament.end_date < date.today())
+            .order_by(Tournament.start_date.desc())
+            .all()
+        )
+    finally:
+        db.close()
+
+    if not completed_tournaments:
+        st.info("No completed tournaments with results yet this season.")
+        st.stop()
+
+    # Tournament selector
+    tournament_options = {f"{t.name} ({t.start_date.strftime('%b %d')})" : t for t in completed_tournaments}
+    selected_label = st.selectbox("Select tournament", list(tournament_options.keys()))
+    selected_tournament = tournament_options[selected_label]
+
+    # Load fit scores for that tournament
+    db = db_session()
+    try:
+        fit_scores = (
+            db.query(PlayerFitScore)
+            .filter(PlayerFitScore.tournament_id == selected_tournament.id)
+            .order_by(PlayerFitScore.composite_score.desc())
+            .all()
+        )
+
+        # Load actual results for that tournament
+        results = (
+            db.query(TournamentResult)
+            .filter(
+                TournamentResult.tournament_id == selected_tournament.id,
+                TournamentResult.season == current_year,
+            )
+            .all()
+        )
+    finally:
+        db.close()
+
+    if not fit_scores:
+        st.warning("No fit scores were computed for this tournament. The model may not have been running yet.")
+        st.stop()
+
+    if not results:
+        st.warning("No actual results found for this tournament.")
+        st.stop()
+
+    # Build results lookup
+    results_map = {r.player_id: r for r in results}
+
+    # How many top picks to show
+    top_n = st.slider("Show top N picks", min_value=5, max_value=min(50, len(fit_scores)), value=10)
+
+    st.subheader(f"Top {top_n} Picks vs. Actual Results — {selected_tournament.name}")
+
+    rows = []
+    for i, fs in enumerate(fit_scores[:top_n], 1):
+        actual = results_map.get(fs.player_id)
+        actual_pos = actual.position if actual else "N/A"
+        actual_score = None
+        if actual and actual.par_relative_score is not None:
+            actual_score = f"{'+' if actual.par_relative_score > 0 else ''}{actual.par_relative_score}"
+
+        rows.append({
+            "Tip #": i,
+            "Player": fs.player_name,
+            "Fit Score": round(fs.composite_score, 3),
+            "Actual Finish": actual_pos or "—",
+            "Actual Score": actual_score or "—",
+        })
+
+    df_track = pd.DataFrame(rows)
+    st.dataframe(df_track, use_container_width=True, hide_index=True)
+
+    # Summary stats
+    finishes = []
+    top10_hits = 0
+    top20_hits = 0
+    winner_hit = False
+    for row in rows:
+        pos = row["Actual Finish"]
+        if pos and pos not in ("—", "N/A", "CUT", "WD", "DQ", "MDF"):
+            try:
+                pos_num = int(str(pos).lstrip("T"))
+                finishes.append(pos_num)
+                if pos_num <= 10:
+                    top10_hits += 1
+                if pos_num <= 20:
+                    top20_hits += 1
+                if pos_num == 1:
+                    winner_hit = True
+            except ValueError:
+                pass
+
+    st.markdown("---")
+    st.subheader("Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Avg Finish", f"{sum(finishes)/len(finishes):.0f}" if finishes else "—")
+    col2.metric("Top 10 Hits", f"{top10_hits}/{top_n}")
+    col3.metric("Top 20 Hits", f"{top20_hits}/{top_n}")
+    col4.metric("Winner Picked?", "✅ Yes" if winner_hit else "❌ No")
+
+    if finishes:
+        st.caption(f"Of the top {top_n} picks, {len(finishes)} made the cut. Best finish: {min(finishes)}. Worst: {max(finishes)}.")
+
+    # Show all tournaments summary
+    st.markdown("---")
+    st.subheader("Season Overview — All Tournaments")
+
+    overview_rows = []
+    for t in completed_tournaments:
+        db = db_session()
+        try:
+            t_scores = (
+                db.query(PlayerFitScore)
+                .filter(PlayerFitScore.tournament_id == t.id)
+                .order_by(PlayerFitScore.composite_score.desc())
+                .limit(10)
+                .all()
+            )
+            t_results = (
+                db.query(TournamentResult)
+                .filter(
+                    TournamentResult.tournament_id == t.id,
+                    TournamentResult.season == current_year,
+                )
+                .all()
+            )
+        finally:
+            db.close()
+
+        if not t_scores or not t_results:
+            continue
+
+        t_results_map = {r.player_id: r for r in t_results}
+        t_finishes = []
+        t_top10 = 0
+        t_winner = False
+        for fs in t_scores[:10]:
+            actual = t_results_map.get(fs.player_id)
+            if actual and actual.position and actual.position not in ("CUT", "WD", "DQ", "MDF"):
+                try:
+                    pos_num = int(actual.position.lstrip("T"))
+                    t_finishes.append(pos_num)
+                    if pos_num <= 10:
+                        t_top10 += 1
+                    if pos_num == 1:
+                        t_winner = True
+                except ValueError:
+                    pass
+
+        overview_rows.append({
+            "Tournament": t.name,
+            "Date": t.start_date.strftime("%b %d") if t.start_date else "—",
+            "Avg Finish (Top 10)": f"{sum(t_finishes)/len(t_finishes):.0f}" if t_finishes else "—",
+            "Top 10 Hits": f"{t_top10}/10",
+            "Winner?": "✅" if t_winner else "❌",
+        })
+
+    if overview_rows:
+        st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("No historical predictions available yet.")
