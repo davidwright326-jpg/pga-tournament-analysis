@@ -1218,6 +1218,40 @@ elif page == "📈 Track Record":
         st.info("No completed tournaments with results yet this season.")
         st.stop()
 
+    # Check if we need to backfill fit scores for past tournaments
+    db = db_session()
+    try:
+        tournaments_with_scores = set()
+        for t in completed_tournaments:
+            count = db.query(PlayerFitScore).filter(PlayerFitScore.tournament_id == t.id).count()
+            if count > 0:
+                tournaments_with_scores.add(t.id)
+        tournaments_needing_backfill = [t for t in completed_tournaments if t.id not in tournaments_with_scores]
+    finally:
+        db.close()
+
+    if tournaments_needing_backfill:
+        st.warning(f"{len(tournaments_needing_backfill)} tournament(s) have no fit scores yet. Click below to backfill.")
+        if st.button("🔄 Backfill Historical Scores"):
+            with st.spinner("Computing fit scores for past tournaments... This may take a minute."):
+                from app.analysis.engine import compute_stat_weights
+                from app.analysis.scoring import compute_all_fit_scores
+                from app.config import DEFAULT_LOOKBACK_SEASONS
+
+                db = db_session()
+                try:
+                    seasons = list(range(current_year - DEFAULT_LOOKBACK_SEASONS, current_year + 1))
+                    for t in tournaments_needing_backfill:
+                        # Compute weights for this tournament
+                        weights = compute_stat_weights(t.id, seasons, db)
+                        # Compute fit scores for all players
+                        compute_all_fit_scores(t.id, weights, current_year, db)
+                finally:
+                    db.close()
+            st.success("Backfill complete! Reload the page to see results.")
+            st.cache_data.clear()
+            st.stop()
+
     # Tournament selector
     tournament_options = {f"{t.name} ({t.start_date.strftime('%b %d')})" : t for t in completed_tournaments}
     selected_label = st.selectbox("Select tournament", list(tournament_options.keys()))
