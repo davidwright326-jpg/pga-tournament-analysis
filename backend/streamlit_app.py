@@ -1301,7 +1301,11 @@ elif page == "📈 Track Record":
         actual_pos = actual.position if actual else "N/A"
         actual_score = None
         if actual and actual.par_relative_score is not None:
-            actual_score = f"{'+' if actual.par_relative_score > 0 else ''}{actual.par_relative_score}"
+            try:
+                prs = int(actual.par_relative_score)
+                actual_score = f"{'+' if prs > 0 else ''}{prs}"
+            except (TypeError, ValueError):
+                actual_score = str(actual.par_relative_score)
 
         rows.append({
             "Tip #": i,
