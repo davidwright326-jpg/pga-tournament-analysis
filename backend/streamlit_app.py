@@ -116,6 +116,10 @@ SHORT_LABELS = {
 @st.cache_resource
 def get_db():
     init_db()
+    # Ensure all tables exist (handles new models added after initial DB creation)
+    from app.models import Base
+    from app.database import engine
+    Base.metadata.create_all(bind=engine)
     return SessionLocal
 
 
@@ -1241,14 +1245,19 @@ elif page == "📈 Track Record":
                 db = db_session()
                 try:
                     seasons = list(range(current_year - DEFAULT_LOOKBACK_SEASONS, current_year + 1))
+                    errors = []
                     for t in tournaments_needing_backfill:
-                        # Compute weights for this tournament
-                        weights = compute_stat_weights(t.id, seasons, db)
-                        # Compute fit scores for all players
-                        compute_all_fit_scores(t.id, weights, current_year, db)
+                        try:
+                            weights = compute_stat_weights(t.id, seasons, db)
+                            compute_all_fit_scores(t.id, weights, current_year, db)
+                        except Exception as e:
+                            errors.append(f"{t.name}: {e}")
                 finally:
                     db.close()
-            st.success("Backfill complete! Reload the page to see results.")
+            if errors:
+                st.warning(f"Completed with {len(errors)} error(s):\n" + "\n".join(errors[:5]))
+            else:
+                st.success("Backfill complete! Reload the page to see results.")
             st.cache_data.clear()
             st.stop()
 
