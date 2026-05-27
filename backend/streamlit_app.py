@@ -1299,15 +1299,22 @@ elif page == "📈 Track Record":
     # Build results lookup
     results_map = {r.player_id: r for r in results}
 
+    # Filter fit scores to only players who actually played
+    fit_scores_in_field = [fs for fs in fit_scores if fs.player_id in results_map]
+
+    if not fit_scores_in_field:
+        st.warning("No picks matched players who actually played in this tournament.")
+        st.stop()
+
     # How many top picks to show
-    top_n = st.slider("Show top N picks", min_value=5, max_value=min(50, len(fit_scores)), value=10)
+    top_n = st.slider("Show top N picks", min_value=5, max_value=min(50, len(fit_scores_in_field)), value=min(10, len(fit_scores_in_field)))
 
     st.subheader(f"Top {top_n} Picks vs. Actual Results — {selected_tournament.name}")
 
     rows = []
-    for i, fs in enumerate(fit_scores[:top_n], 1):
+    for i, fs in enumerate(fit_scores_in_field[:top_n], 1):
         actual = results_map.get(fs.player_id)
-        actual_pos = actual.position if actual else "N/A"
+        actual_pos = actual.position if actual else "—"
         actual_score = None
         if actual and actual.par_relative_score is not None:
             try:
