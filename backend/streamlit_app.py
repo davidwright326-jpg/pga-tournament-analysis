@@ -1222,47 +1222,23 @@ elif page == "📈 Track Record":
         st.info("No completed tournaments with results yet this season.")
         st.stop()
 
-    # Check if we need to backfill fit scores for past tournaments
+    # Only show tournaments where the model actually computed scores BEFORE the event
     db = db_session()
     try:
-        tournaments_with_scores = set()
+        tournaments_with_scores = []
         for t in completed_tournaments:
             count = db.query(PlayerFitScore).filter(PlayerFitScore.tournament_id == t.id).count()
             if count > 0:
-                tournaments_with_scores.add(t.id)
-        tournaments_needing_backfill = [t for t in completed_tournaments if t.id not in tournaments_with_scores]
+                tournaments_with_scores.append(t)
     finally:
         db.close()
 
-    if tournaments_needing_backfill:
-        st.warning(f"{len(tournaments_needing_backfill)} tournament(s) have no fit scores yet. Click below to backfill.")
-        if st.button("🔄 Backfill Historical Scores"):
-            with st.spinner("Computing fit scores for past tournaments... This may take a minute."):
-                from app.analysis.engine import compute_stat_weights
-                from app.analysis.scoring import compute_all_fit_scores
-                from app.config import DEFAULT_LOOKBACK_SEASONS
-
-                db = db_session()
-                try:
-                    seasons = list(range(current_year - DEFAULT_LOOKBACK_SEASONS, current_year + 1))
-                    errors = []
-                    for t in tournaments_needing_backfill:
-                        try:
-                            weights = compute_stat_weights(t.id, seasons, db)
-                            compute_all_fit_scores(t.id, weights, current_year, db)
-                        except Exception as e:
-                            errors.append(f"{t.name}: {e}")
-                finally:
-                    db.close()
-            if errors:
-                st.warning(f"Completed with {len(errors)} error(s):\n" + "\n".join(errors[:5]))
-            else:
-                st.success("Backfill complete! Reload the page to see results.")
-            st.cache_data.clear()
-            st.stop()
+    if not tournaments_with_scores:
+        st.info("No track record yet — the model needs to run before a tournament starts, then results are compared after. Check back after this week's event completes.")
+        st.stop()
 
     # Tournament selector
-    tournament_options = {f"{t.name} ({t.start_date.strftime('%b %d')})" : t for t in completed_tournaments}
+    tournament_options = {f"{t.name} ({t.start_date.strftime('%b %d')})" : t for t in tournaments_with_scores}
     selected_label = st.selectbox("Select tournament", list(tournament_options.keys()))
     selected_tournament = tournament_options[selected_label]
 
@@ -1367,10 +1343,10 @@ elif page == "📈 Track Record":
 
     # Show all tournaments summary
     st.markdown("---")
-    st.subheader("Season Overview — All Tournaments")
+    st.subheader("Season Overview")
 
     overview_rows = []
-    for t in completed_tournaments:
+    for t in tournaments_with_scores:
         db = db_session()
         try:
             t_scores = (
