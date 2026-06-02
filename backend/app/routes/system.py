@@ -107,6 +107,9 @@ def _run_refresh_sync():
         # 6. Compute fit scores
         compute_all_fit_scores(current.id, weights, current_year, db)
 
+        # 7. Save top picks to track record JSON for persistence
+        _save_track_record_entry(current, db)
+
         _refresh_status["status"] = "completed"
         _refresh_status["last_refresh"] = datetime.utcnow().isoformat()
         logger.info("Refresh completed successfully")
@@ -118,6 +121,68 @@ def _run_refresh_sync():
     finally:
         db.close()
         loop.close()
+
+
+def _save_track_record_entry(tournament, db):
+    """Save the current tournament's top picks to the track record JSON file."""
+    import json
+    import os
+    from app.models import PlayerFitScore
+
+    try:
+        track_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "track_record.json")
+
+        # Load existing track record
+        if os.path.exists(track_file):
+            with open(track_file, "r", encoding="utf-8") as f:
+                track_record = json.load(f)
+        else:
+            track_record = []
+
+        # Check if this tournament is already in the track record
+        existing_ids = {entry["tournament_id"] for entry in track_record}
+        if tournament.id in existing_ids:
+            return  # Already saved
+
+        # Get top 20 picks
+        top_picks = (
+            db.query(PlayerFitScore)
+            .filter(PlayerFitScore.tournament_id == tournament.id)
+            .order_by(PlayerFitScore.composite_score.desc())
+            .limit(20)
+            .all()
+        )
+
+        if not top_picks:
+            return
+
+        entry = {
+            "tournament_id": tournament.id,
+            "tournament_name": tournament.name,
+            "course_name": tournament.course_name,
+            "start_date": tournament.start_date.isoformat() if tournament.start_date else None,
+            "computed_at": datetime.utcnow().isoformat(),
+            "picks": [
+                {
+                    "rank": i + 1,
+                    "player_id": p.player_id,
+                    "player_name": p.player_name,
+                    "composite_score": round(p.composite_score, 4),
+                }
+                for i, p in enumerate(top_picks)
+            ],
+        }
+
+        track_record.append(entry)
+
+        # Save back
+        os.makedirs(os.path.dirname(track_file), exist_ok=True)
+        with open(track_file, "w", encoding="utf-8") as f:
+            json.dump(track_record, f, indent=2)
+
+        logger.info("Saved track record entry for %s (%d picks)", tournament.name, len(top_picks))
+    except Exception as e:
+        logger.error("Failed to save track record: %s", e)
 
 
 @router.post("/refresh")
