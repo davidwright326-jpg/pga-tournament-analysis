@@ -1,0 +1,139 @@
+name: Weekly PGA Data Refresh
+
+on:
+  schedule:
+    # Every Tuesday at 10:00 UTC (6:00 AM ET)
+    - cron: '0 10 * * 2'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+
+      - name: Run data refresh
+        working-directory: backend
+        run: |
+          python -c "
+          import asyncio
+          import sys
+          sys.path.insert(0, '.')
+          from app.database import init_db, SessionLocal
+          from app.data.ingestion import ingest_schedule, ingest_player_stats, ingest_past_results, ingest_tournament_field
+          from app.data.tournament_resolver import resolve_current_tournament
+          from app.analysis.engine import compute_stat_weights, generate_explanation
+          from app.analysis.scoring import compute_all_fit_scores
+          from app.models import Tournament, CourseStatWeight
+          from app.config import DEFAULT_LOOKBACK_SEASONS
+          from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
+          from datetime import date
+          import json, os, logging
+
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
+
+          async def main():
+              current_year = date.today().year
+              init_db()
+              db = SessionLocal()
+
+              try:
+                  # 1. Ingest schedule
+                  await ingest_schedule(current_year, db)
+
+                  # 2. Find current tournament
+                  tournaments = db.query(Tournament).order_by(Tournament.start_date).all()
+                  current = resolve_current_tournament(date.today(), tournaments)
+                  if not current:
+                      logger.info('No current tournament found')
+                      return
+
+                  logger.info(f'Current tournament: {current.name}')
+
+                  # 3. Ingest player stats
+                  await ingest_player_stats(current_year, db)
+
+                  # 4. Ingest field
+                  await ingest_tournament_field(current.id, db)
+
+                  # 5. Compute stat weights
+                  seasons = list(range(current_year - DEFAULT_LOOKBACK_SEASONS, current_year + 1))
+                  weights = compute_stat_weights(current.id, seasons, db)
+
+                  # Store weights
+                  for cat, weight in weights.items():
+                      explanation = generate_explanation(cat, weight, weights)
+                      stmt = sqlite_upsert(CourseStatWeight).values(
+                          tournament_id=current.id, stat_category=cat, weight=weight, explanation=explanation,
+                      ).on_conflict_do_update(
+                          index_elements=['tournament_id', 'stat_category'],
+                          set_={'weight': weight, 'explanation': explanation},
+                      )
+                      db.execute(stmt)
+                  db.commit()
+
+                  # 6. Compute fit scores
+                  compute_all_fit_scores(current.id, weights, current_year, db)
+
+                  # 7. Save track record
+                  from app.models import PlayerFitScore
+                  from datetime import datetime
+
+                  track_file = os.path.join('data', 'track_record.json')
+                  if os.path.exists(track_file):
+                      with open(track_file, 'r') as f:
+                          track_record = json.load(f)
+                  else:
+                      track_record = []
+
+                  existing_ids = {e['tournament_id'] for e in track_record}
+                  if current.id not in existing_ids:
+                      top_picks = (
+                          db.query(PlayerFitScore)
+                          .filter(PlayerFitScore.tournament_id == current.id)
+                          .order_by(PlayerFitScore.composite_score.desc())
+                          .limit(20)
+                          .all()
+                      )
+                      if top_picks:
+                          entry = {
+                              'tournament_id': current.id,
+                              'tournament_name': current.name,
+                              'course_name': current.course_name,
+                              'start_date': current.start_date.isoformat() if current.start_date else None,
+                              'computed_at': datetime.utcnow().isoformat(),
+                              'picks': [
+                                  {'rank': i+1, 'player_id': p.player_id, 'player_name': p.player_name, 'composite_score': round(p.composite_score, 4)}
+                                  for i, p in enumerate(top_picks)
+                              ],
+                          }
+                          track_record.append(entry)
+                          os.makedirs('data', exist_ok=True)
+                          with open(track_file, 'w') as f:
+                              json.dump(track_record, f, indent=2)
+                          logger.info(f'Saved {len(top_picks)} picks for {current.name}')
+
+                  logger.info('Refresh complete')
+              finally:
+                  db.close()
+
+          asyncio.run(main())
+          "
+
+      - name: Commit and push track record
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/data/track_record.json
+          git diff --cached --quiet || git commit -m "Auto-update track record [skip ci]"
+          git push
